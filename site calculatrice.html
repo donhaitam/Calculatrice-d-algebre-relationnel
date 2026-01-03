@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>Calculatrice Algèbre Relationnelle</title>
+
+<style>
+body {
+    font-family: Arial, sans-serif;
+    background: #f1f5f9;
+    margin: 0;
+}
+
+header {
+    background: #0f172a;
+    color: white;
+    padding: 15px;
+    text-align: center;
+}
+
+.container {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 15px;
+    padding: 20px;
+}
+
+.box {
+    background: white;
+    padding: 15px;
+    border-radius: 6px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+}
+
+h2 {
+    margin-top: 0;
+}
+
+textarea {
+    width: 100%;
+    height: 120px;
+    padding: 8px;
+    margin-bottom: 10px;
+    font-family: monospace;
+}
+
+button {
+    padding: 8px 12px;
+    margin: 4px;
+    cursor: pointer;
+    border: none;
+    border-radius: 4px;
+    background: #2563eb;
+    color: white;
+}
+
+button:hover {
+    background: #1e40af;
+}
+
+.ops button {
+    background: #64748b;
+}
+
+.ops button:hover {
+    background: #475569;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 10px;
+}
+
+th, td {
+    border: 1px solid #cbd5e1;
+    padding: 6px;
+    text-align: left;
+}
+
+.error {
+    color: red;
+    font-weight: bold;
+}
+</style>
+</head>
+
+<body>
+
+<header>
+    <h1>Calculatrice d’Algèbre Relationnelle</h1>
+</header>
+
+<div class="container">
+
+    <!-- Relations -->
+    <div class="box">
+        <h2>Relations</h2>
+        <textarea id="dataInput" placeholder="R = { id, nom
+1, Ali
+2, Sara }"></textarea>
+        <button onclick="loadData()">Charger</button>
+        <div id="relations"></div>
+    </div>
+
+    <!-- Requête -->
+    <div class="box">
+        <h2>Requête</h2>
+
+        <div class="ops">
+            <button onclick="add('σ(condition)')">σ</button>
+            <button onclick="add('π(colonnes)')">π</button>
+            <button onclick="add(' ∪ ')">∪</button>
+            <button onclick="add(' ∩ ')">∩</button>
+            <button onclick="add(' − ')">−</button>
+            <button onclick="add(' × ')">×</button>
+            <button onclick="add(' ⋈ ')">⋈</button>
+        </div>
+
+        <textarea id="queryInput" placeholder="π(nom)(σ(id>1)(R))"></textarea>
+        <button onclick="run()">Exécuter</button>
+    </div>
+
+    <!-- Résultat -->
+    <div class="box">
+        <h2>Résultat</h2>
+        <div id="result"></div>
+    </div>
+
+</div>
+
+<script>
+let DB = {};
+
+// Ajouter symbole
+function add(txt) {
+    document.getElementById("queryInput").value += txt;
+}
+
+// Charger relations
+function loadData() {
+    DB = {};
+    let input = document.getElementById("dataInput").value;
+    let parts = input.split("}");
+
+    parts.forEach(p => {
+        if (!p.includes("=")) return;
+        let [name, body] = p.split("=");
+        name = name.trim();
+
+        let lines = body.replace("{","").trim().split("\n");
+        let cols = lines[0].split(",").map(c=>c.trim());
+
+        DB[name] = lines.slice(1).map(l => {
+            let vals = l.split(",");
+            let obj = {};
+            cols.forEach((c,i)=>{
+                obj[c] = isNaN(vals[i]) ? vals[i].trim() : Number(vals[i]);
+            });
+            return obj;
+        });
+    });
+
+    document.getElementById("relations").innerHTML =
+        Object.keys(DB).map(r=>"<b>"+r+"</b>").join(" , ");
+}
+
+// Évaluation
+function evalExpr(e) {
+    e = e.trim();
+
+    if (DB[e]) return DB[e];
+
+    if (e.startsWith("σ")) {
+        let m = e.match(/σ\((.+)\)\((.+)\)/);
+        return select(evalExpr(m[2]), m[1]);
+    }
+
+    if (e.startsWith("π")) {
+        let m = e.match(/π\((.+)\)\((.+)\)/);
+        return project(evalExpr(m[2]), m[1]);
+    }
+
+    for (let op of ["∪","∩","−","×","⋈"]) {
+        let i = e.indexOf(op);
+        if (i !== -1) {
+            let A = evalExpr(e.slice(0,i));
+            let B = evalExpr(e.slice(i+1));
+            return operate(A,B,op);
+        }
+    }
+
+    throw "Requête invalide";
+}
+
+// Sélection
+function select(tab, cond) {
+    let [c,o,v] = cond.match(/(\w+)([><=])(.+)/).slice(1);
+    v = isNaN(v) ? v.trim() : Number(v);
+    return tab.filter(r =>
+        o==="=" ? r[c]==v : o===">" ? r[c]>v : r[c]<v
+    );
+}
+
+// Projection
+function project(tab, cols) {
+    let list = cols.split(",").map(x=>x.trim());
+    return tab.map(r=>{
+        let o={};
+        list.forEach(c=>o[c]=r[c]);
+        return o;
+    });
+}
+
+// Opérations binaires
+function operate(A,B,op) {
+    if (op==="∪") return [...A,...B];
+    if (op==="∩") return A.filter(a=>B.some(b=>JSON.stringify(a)==JSON.stringify(b)));
+    if (op==="−") return A.filter(a=>!B.some(b=>JSON.stringify(a)==JSON.stringify(b)));
+    if (op==="×") return A.flatMap(a=>B.map(b=>({...a,...b})));
+    if (op==="⋈") {
+        let k = Object.keys(A[0]).filter(x=>x in B[0]);
+        return A.flatMap(a=>B.filter(b=>k.every(c=>a[c]==b[c])).map(b=>({...a,...b})));
+    }
+}
+
+// Exécuter
+function run() {
+    try {
+        let res = evalExpr(document.getElementById("queryInput").value);
+        show(res);
+    } catch(err) {
+        document.getElementById("result").innerHTML = "<p class='error'>"+err+"</p>";
+    }
+}
+
+// Affichage
+function show(data) {
+    if (!data.length) {
+        document.getElementById("result").innerText = "Aucun résultat";
+        return;
+    }
+    let cols = Object.keys(data[0]);
+    let html = "<table><tr>"+cols.map(c=>"<th>"+c+"</th>").join("")+"</tr>";
+    data.forEach(r=>{
+        html+="<tr>"+cols.map(c=>"<td>"+r[c]+"</td>").join("")+"</tr>";
+    });
+    html+="</table>";
+    document.getElementById("result").innerHTML = html;
+}
+</script>
+
+</body>
+</html>
